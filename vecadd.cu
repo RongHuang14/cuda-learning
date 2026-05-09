@@ -4,21 +4,25 @@
 #include <time.h>
 #include <cuda_runtime.h>
 
+__host__ __device__ float f(float a, float b) {
+    return a + b;
+}
+
 void vecadd_cpu(float* x, float* y, float* z, int N) {
     for (unsigned int i = 0; i < N; i++) {
-        z[i] = x[i] + y[i];
+        z[i] = f(x[i], y[i]);
     }
 }
 
 __global__ void vecadd_kernel(float* x, float* y, float* z, int N) {
     unsigned int i = blockDim.x * blockIdx.x + threadIdx.x;
     if (i < N) {
-        z[i] = x[i] + y[i];
+        z[i] = f(x[i], y[i]);
     }
 }
 
 void vecadd_gpu(float* x, float* y, float* z, int N, float* gpu_time_ms) {
-    // Allocate gpu memory
+    // Allocate GPU memory
     float *x_d, *y_d, *z_d;
     cudaMalloc((void**)&x_d, N * sizeof(float));
     cudaMalloc((void**)&y_d, N * sizeof(float));
