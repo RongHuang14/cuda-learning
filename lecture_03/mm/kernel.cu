@@ -1,27 +1,40 @@
 #include "common.h"
 #include "timer.h"
 #define TILE_DIM 32
+#define COARSE_FACTOR 4
 
 // 每个线程计算 C 中的一个元素 C[row][col] = A[row] · B[:,col]
 __global__ void mm_tiled_kernel(float* A, float* B, float* C, unsigned int N) {
-    unsigned int row = blockIdx.y*blockDim.y + threadIdx.y;
-    unsigned int col = blockIdx.x*blockDim.x + threadIdx.x;
-
     __shared__ float A_s[TILE_DIM][TILE_DIM];
     __shared__ float B_s[TILE_DIM][TILE_DIM];
 
-    float sum = 0.0f;    
+    unsigned int row = blockIdx.y*blockDim.y + threadIdx.y;
+    unsigned int colStart = blockIdx.x*blockDim.x*COARSE_FACTOR + threadIdx.x;
+
+    float sum[COARSE_FACTOR];
+    for(unsigned int c = 0; c < COARSE_FACTOR; ++c) {
+    	sum[c] = 0.0f;
+    }
+   
     for (unsigned int tile = 0; tile < N/TILE_DIM; ++tile) {
     	A_s[threadIdx.y][threadIdx.x] = A[row*N + tile*TILE_DIM + threadIdx.x];
-	B_s[threadIdx.y][threadIdx.x] = B[(tile*TILE_DIM + threadIdx.y)*N + col];
-	__syncthreads();
+	
+	for(unsigned int c = 0; c < COARSE_FACTOR; ++c) {
+		unsigned int col = colStart + c*TILE_DIM;
+		B_s[threadIdx.y][threadIdx.x] = B[(tile*TILE_DIM + threadIdx.y)*N + col];
+		__syncthreads();
 
-	for (unsigned int i = 0; i < TILE_DIM; ++i) {
-		sum += A_s[threadIdx.y][i]*B_s[i][threadIdx.x];
-	}
-	__syncthreads();
+		for (unsigned int i = 0; i < TILE_DIM; ++i) {
+			sum[c] += A_s[threadIdx.y][i]*B_s[i][threadIdx.x];
+		}
+		__syncthreads();	
+	}	
+    }	
+    for(unsigned int c = 0; c < COARSE_FACTOR; ++c) {
+    	unsigned int col = colStart + c*TILE_DIM;
+	C[row*N + col] = sum[c];
     }
-    C[row*N + col] = sum;
+  
 
 }
 
@@ -46,7 +59,7 @@ void mm_gpu(float* A, float* B, float* C, unsigned int N) {
 
     startTime(&timer);
     dim3 numThreadsPerBlock(32, 32);
-    dim3 numBlocks((N + numThreadsPerBlock.x - 1)/numThreadsPerBlock.x,
+    dim3 numBlocks((N + numThreadsPerBlock.x - 1)/numThreadsPerBlock.x/COARSE_FACTOR,
                    (N + numThreadsPerBlock.y - 1)/numThreadsPerBlock.y);
     mm_tiled_kernel<<< numBlocks, numThreadsPerBlock >>>(A_d, B_d, C_d, N);
     cudaDeviceSynchronize();
